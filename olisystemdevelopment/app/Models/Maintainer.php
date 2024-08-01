@@ -23,13 +23,13 @@ class Maintainer extends Model
         return $this->belongsTo(User::class, 'user_id', 'id');
     }
 
-    public function property(): HasOne
+    /**
+     * Get the property that owns the Maintainer
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
+     */
+    public function property(): BelongsTo
     {
-        return $this->hasOne(Property::class, 'id', 'property_id');
-    }
-
-    public function properties(): HasMany
-    {
-        return $this->hasMany(Property::class, 'maintainer_id', 'user_id');
+        return $this->belongsTo(Property::class, 'property_id', 'id');
     }
 }
