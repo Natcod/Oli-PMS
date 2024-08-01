@@ -2,6 +2,8 @@
 
 namespace App\Services;
 
+use App\Models\User;
+use App\Models\Maintainer;
 use App\Models\FileManager;
 use App\Models\MaintenanceRequest;
 use App\Models\Property;
@@ -9,6 +11,9 @@ use App\Traits\ResponseTrait;
 use Exception;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+
 
 class MaintenanceRequestService
 {
@@ -125,73 +130,133 @@ class MaintenanceRequestService
 
 
     public function store($request)
+{
+    DB::beginTransaction();
+    try {
+        $authUser = auth()->user();
+        if ($authUser->role == USER_ROLE_OWNER) {
+            $userId = $authUser->id;
+        } else {
+            $userId = $authUser->owner_user_id;
+            if ($authUser->tenant->property_id != $request->property_id || $authUser->tenant->unit_id != $request->unit_id) {
+                throw new Exception(__(SOMETHING_WENT_WRONG));
+            } else {
+                $request->merge(['status' => MAINTENANCE_REQUEST_STATUS_PENDING]);
+            }
+        }
+
+        $id = $request->get('id', '');
+        if ($id != '') {
+            $maintenance = MaintenanceRequest::where('owner_user_id', $userId)->findOrFail($request->id);
+        } else {
+            $maintenance = new MaintenanceRequest();
+        }
+
+        // maintenance
+        $maintenance->property_id = $request->property_id;
+        $maintenance->owner_user_id = $userId;
+        $maintenance->unit_id = $request->unit_id;
+        $maintenance->issue_id = $request->issue_id;
+        $maintenance->details = $request->details;
+        $maintenance->created_date = $request->created_date;
+        $maintenance->status = in_array($request->status, [MAINTENANCE_REQUEST_STATUS_COMPLETE, MAINTENANCE_REQUEST_STATUS_INPROGRESS, MAINTENANCE_REQUEST_STATUS_PENDING]) ? $request->status : MAINTENANCE_REQUEST_STATUS_PENDING;
+        $maintenance->save();
+
+        /*File Manager Call upload*/
+        if ($request->hasFile('attach')) {
+            $exitFile = FileManager::where('origin_type', 'App\Models\MaintenanceRequest')->where('id', $maintenance->attach_id)->first();
+            if ($exitFile) {
+                $exitFile->removeFile();
+                $upload = $exitFile->updateUpload($exitFile->id, 'MaintenanceRequest', $request->attach);
+            } else {
+                $newFile = new FileManager();
+                $upload = $newFile->upload('MaintenanceRequest', $request->attach);
+            }
+
+            if ($upload['status']) {
+                $maintenance->attach_id = $upload['file']->id;
+                $maintenance->save();
+                $upload['file']->origin_type = "App\Models\MaintenanceRequest";
+                $upload['file']->save();
+            } else {
+                throw new Exception($upload['message']);
+            }
+        }
+        /*End*/
+
+        $property = Property::find($request->property_id);
+        if (isset($property)) {
+            addNotification(__('New maintenance Request'), $request->details, null, null, $property->maintainer_id, auth()->id());
+        }
+
+        // Fetch owner and maintainer contact numbers
+        $owner = User::find($userId);
+
+        // Debugging - check if maintainers are fetched correctly
+        Log::info('Fetching maintainers for property ID: ' . $request->property_id);
+
+        // Fetch maintainers directly related to the property
+        $maintainers = Maintainer::where('property_id', $request->property_id)->get();
+
+        Log::info('Maintainers retrieved: ' . $maintainers->count());
+
+        foreach ($maintainers as $maintainer) {
+            $user = User::find($maintainer->user_id);
+            Log::info('Maintainer ID: ' . $maintainer->id . ', Contact Number: ' . $user->contact_number);
+            if ($user && $user->contact_number) {
+                $this->sendSmsNotification($user->contact_number, __('New maintenance request has been created.'));
+            }
+        }
+
+        if ($owner) {
+            $this->sendSmsNotification($owner->contact_number, __('New maintenance request has been created.'));
+        }
+
+        DB::commit();
+        $message = $request->id ? __(UPDATED_SUCCESSFULLY) : __(CREATED_SUCCESSFULLY);
+        return $this->success([], $message);
+    } catch (Exception $e) {
+        DB::rollBack();
+        $message = getErrorMessage($e, $e->getMessage());
+        Log::error('Maintenance request store error: ' . $message);
+        return $this->error([], $message);
+    }
+}
+
+    
+     private function sendSmsNotification($phoneNumber, $message)
     {
-        DB::beginTransaction();
-        try {
-            $authUser = auth()->user();
-            if ($authUser->role == USER_ROLE_OWNER) {
-                $userId = $authUser->id;
-            } else {
-                $userId = $authUser->owner_user_id;
-                if ($authUser->tenant->property_id != $request->property_id || $authUser->tenant->unit_id != $request->unit_id) {
-                    throw new Exception(__(SOMETHING_WENT_WRONG));
-                } else {
-                    $request->merge(['status' => MAINTENANCE_REQUEST_STATUS_PENDING]);
-                }
-            }
-
-            $id = $request->get('id', '');
-            if ($id != '') {
-                $maintenance = MaintenanceRequest::where('owner_user_id', $userId)->findOrFail($request->id);
-            } else {
-                $maintenance = new MaintenanceRequest();
-            }
-
-            // maintenance
-            $maintenance->property_id = $request->property_id;
-            $maintenance->owner_user_id = $userId;
-            $maintenance->unit_id = $request->unit_id;
-            $maintenance->issue_id = $request->issue_id;
-            $maintenance->details = $request->details;
-            $maintenance->created_date = $request->created_date;
-            $maintenance->status = in_array($request->status, [MAINTENANCE_REQUEST_STATUS_COMPLETE, MAINTENANCE_REQUEST_STATUS_INPROGRESS, MAINTENANCE_REQUEST_STATUS_PENDING]) ? $request->status : MAINTENANCE_REQUEST_STATUS_PENDING;
-            $maintenance->save();
-
-            /*File Manager Call upload*/
-            if ($request->hasFile('attach')) {
-                $exitFile = FileManager::where('origin_type', 'App\Models\MaintenanceRequest')->where('id', $maintenance->attach_id)->first();
-                if ($exitFile) {
-                    $exitFile->removeFile();
-                    $upload = $exitFile->updateUpload($exitFile->id, 'MaintenanceRequest', $request->attach);
-                } else {
-                    $newFile = new FileManager();
-                    $upload = $newFile->upload('MaintenanceRequest', $request->attach);
-                }
-
-                if ($upload['status']) {
-                    $maintenance->attach_id = $upload['file']->id;
-                    $maintenance->save();
-                    $upload['file']->origin_type = "App\Models\MaintenanceRequest";
-                    $upload['file']->save();
-                } else {
-                    throw new Exception($upload['message']);
-                }
-            }
-            /*End*/
-            $property = Property::find($request->property_id);
-            if (isset($property)) {
-                addNotification(__('New maintenance Request'), $request->details, null, null, $property->maintainer_id, auth()->id());
-            }
-
-            DB::commit();
-            $message = $request->id ? __(UPDATED_SUCCESSFULLY) : __(CREATED_SUCCESSFULLY);
-            return $this->success([], $message);
-        } catch (Exception $e) {
-            DB::rollBack();
-            $message = getErrorMessage($e, $e->getMessage());
-            return $this->error([], $message);
+        $smsData = [
+            "secret" => env('SMS_API_SECRET'),
+            "mode" => "devices",
+            "device" => env('SMS_API_DEVICE_ID'),
+            "sim" => 1,
+            "priority" => 1,
+            "phone" => $phoneNumber,
+            "message" => $message,
+        ];
+    
+        $cURL = curl_init("https://sms.olisd.com/api/send/sms");
+        curl_setopt($cURL, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($cURL, CURLOPT_POSTFIELDS, $smsData);
+        $response = curl_exec($cURL);
+        $httpcode = curl_getinfo($cURL, CURLINFO_HTTP_CODE);
+        curl_close($cURL);
+    
+        Log::info('SMS API response: ' . $response);
+    
+        $result = json_decode($response, true);
+    
+        if ($httpcode != 200 || $result['status'] != 200) {
+            Log::error('Failed to send SMS: ' . $result['message']);
+        } else {
+            Log::info('SMS sent successfully to ' . $phoneNumber);
         }
     }
+    
+
+    
+    
 
     public function getInfo($id)
     {
