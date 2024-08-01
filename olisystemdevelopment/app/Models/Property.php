@@ -17,12 +17,12 @@ class Property extends Model
         return $query->whereStatus(ACTIVE);
     }
 
-    public function tenants()
+    public function tenants(): HasMany
     {
         return $this->hasMany(Tenant::class, 'property_id', 'id');
     }
 
-    public function maintainers()
+    public function maintainers(): HasMany
     {
         return $this->hasMany(Maintainer::class, 'property_id', 'id');
     }
@@ -50,7 +50,7 @@ class Property extends Model
         return asset('assets/images/no-image.jpg');
     }
 
-    public function fileAttachThumbnail()
+    public function fileAttachThumbnail(): HasOne
     {
         return $this->hasOne(FileManager::class, 'id', 'thumbnail_image_id')->select('id', 'folder_name', 'file_name', 'origin_type', 'origin_id');
     }
