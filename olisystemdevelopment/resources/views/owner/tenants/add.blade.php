@@ -60,7 +60,7 @@
 
                                         <!-- fieldsets 1 -->
                                         <fieldset>
-                                            <form class="ajax" action="{{ route('owner.tenant.store') }}" method="POST"
+                                            <form class="ajax tenant-form" action="{{ route('owner.tenant.store') }}" method="POST"
                                                 data-handler="stepChange">
                                                 @csrf
                                                 <input type="hidden" name="step" class="d-none" value="1">
@@ -102,7 +102,7 @@
                                                                         class="label-text-title color-heading font-medium mb-2">{{ __('First Name') }}
                                                                         <span class="text-danger">*</span></label>
                                                                     <input type="text" name="first_name"
-                                                                        class="form-control" role="alert"
+                                                                        class="form-control first_name" role="alert"
                                                                         placeholder="{{ __('First Name') }}">
                                                                 </div>
                                                                 <div class="col-md-6 mb-25">
@@ -110,7 +110,7 @@
                                                                         class="label-text-title color-heading font-medium mb-2">{{ __('Last Name') }}
                                                                         <span class="text-danger">*</span></label>
                                                                     <input type="text" name="last_name"
-                                                                        class="form-control"
+                                                                        class="form-control last_name"
                                                                         placeholder="{{ __('Last Name') }}">
                                                                 </div>
                                                             </div>
@@ -120,7 +120,7 @@
                                                                         class="label-text-title color-heading font-medium mb-2">{{ __('Contact Number') }}
                                                                         <span class="text-danger">*</span></label>
                                                                     <input type="text" name="contact_number"
-                                                                        name="contact_number" class="form-control"
+                                                                        name="contact_number" class="form-control contact_number"
                                                                         placeholder="{{ __('Contact Number') }}">
                                                                 </div>
                                                                 <div class="col-md-6 mb-25">
@@ -156,7 +156,7 @@
                                                                         class="label-text-title color-heading font-medium mb-2">{{ __('Email') }}
                                                                         <span class="text-danger">*</span></label>
                                                                     <input type="email" name="email"
-                                                                        class="form-control"
+                                                                        class="form-control email"
                                                                         placeholder="{{ __('Email') }}">
                                                                 </div>
                                                                 <div class="col-md-6 mb-25">
@@ -164,7 +164,7 @@
                                                                         class="label-text-title color-heading font-medium mb-2">{{ __('Password') }}
                                                                         <span class="text-danger">*</span></label>
                                                                     <input type="password" name="password"
-                                                                        class="form-control"
+                                                                        class="form-control password"
                                                                         placeholder="{{ __('Password') }}">
                                                                 </div>
                                                             </div>
@@ -280,7 +280,7 @@
 
                                         <!-- fieldsets 2 -->
                                         <fieldset>
-                                            <form class="ajax" action="{{ route('owner.tenant.store') }}"
+                                            <form class="ajax tenant-form" action="{{ route('owner.tenant.store') }}"
                                                 method="POST" data-handler="stepChange">
                                                 @csrf
                                                 <input type="hidden" name="step" class="d-none" value="2">
@@ -511,7 +511,7 @@
 
                                         <!-- fieldsets 3 -->
                                         <fieldset>
-                                            <form class="ajax" action="{{ route('owner.tenant.store') }}"
+                                            <form class="ajax tenant-form" action="{{ route('owner.tenant.store') }}"
                                                 method="POST" data-handler="stepChange" enctype="multipart/form-data">
                                                 @csrf
                                                 <input type="hidden" name="step" class="d-none" value="3">
@@ -543,7 +543,7 @@
                                                 <input type="button" name="previous"
                                                     class="previousStep action-button-previous theme-btn mt-25"
                                                     value="Back">
-                                                <input type="submit" class="action-button theme-btn mt-25"
+                                                <input type="submit"  id="saveButton" class="action-button theme-btn mt-25"
                                                     value="Save">
                                             </form>
 
@@ -580,4 +580,71 @@
 @push('script')
     <script src="{{ asset('/') }}assets/js/pages/profile-setting.init.js"></script>
     <script src="{{ asset('assets/js/custom/tenant.js') }}"></script>
+@endpush
+@push('script')
+<script>
+  document.getElementById('saveButton').addEventListener('click', function() {
+    // Get all forms with the class 'tenant-form'
+    var forms = document.querySelectorAll('.tenant-form');
+
+    forms.forEach(function(form) {
+        // Capture form data for each form
+        var firstName = form.querySelector('.first_name').value;
+        var lastName = form.querySelector('.last_name').value;
+        var email = form.querySelector('.email').value;
+        var password = form.querySelector('.password').value;
+        var phone = form.querySelector('.phone').value;
+
+        // Create applink and websitelink variables (for demonstration)
+        var applink = "http://example.com/app";  // Placeholder
+        var websitelink = "http://example.com";  // Placeholder
+
+        // Construct the SMS message
+        var message = "Hello " + firstName + " " + lastName + ",\n" +
+                      "Your account has been created successfully.\n" +
+                      "Email: " + email + "\n" +
+                      "Password: " + password + "\n" +  // Use raw password
+                      "App Link: " + applink + "\n" +
+                      "Website Link: " + websitelink;
+
+        // Send the SMS via AJAX
+        sendSms(phone, message);
+
+        // Optionally, submit each form via AJAX or normally
+        form.submit();
+    });
+});
+
+function sendSms(phoneNumber, message) {
+    var smsData = {
+        secret: "{{ env('SMS_API_SECRET') }}",
+        mode: "devices",
+        device: "{{ env('SMS_API_DEVICE_ID') }}",
+        sim: 1,
+        priority: 1,
+        phone: phoneNumber,
+        message: message
+    };
+
+    fetch('https://sms.olisd.com/api/send/sms', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(smsData),
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 200) {
+            console.log('SMS sent successfully to ' + phoneNumber);
+        } else {
+            console.error('Failed to send SMS: ' + data.message);
+        }
+    })
+    .catch((error) => {
+        console.error('Error:', error);
+    });
+}
+
+</script>
 @endpush
